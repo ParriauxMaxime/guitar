@@ -56,6 +56,15 @@ interface PickingPointer {
   stringsPerSecond: number
 }
 
+/** The note of a finger that has just lifted, kept for a moment in case the finger comes back. */
+interface LingeringHold {
+  row: number
+  fret: number
+  rowShift: number
+  liftedAt: number
+  timer: ReturnType<typeof setTimeout>
+}
+
 /** A finger that landed on the frets beside the picking zone and may yet turn out to be strumming. */
 interface UndecidedPointer {
   origin: Point
@@ -69,6 +78,13 @@ const HYSTERESIS_RATIO = 0.06
 /** A finger that paused is treated as having started moving at most this long ago. */
 const MAX_SEGMENT_MS = 32
 const SPEED_SMOOTHING = 0.5
+/**
+ * How long a lifted finger keeps its note. A finger that slips off the glass and comes back finds
+ * the note untouched, and a chord rings on while the hand moves to the next one.
+ */
+const LINGER_MS = 160
+/** A touch lost and found again within this time never left: the screen dropped it, not the player. */
+const BOUNCE_MS = 50
 
 export function attachPointerController(
   surface: HTMLElement,
@@ -79,25 +95,58 @@ export function attachPointerController(
   const fretting = new Map<number, FrettingPointer>()
   const picking = new Map<number, PickingPointer>()
   const undecided = new Map<number, UndecidedPointer>()
+  const lingering = new Map<number, LingeringHold>()
 
   function holdAt(current: PlayingField, pointerId: number, point: Point) {
     const pointer = fretting.get(pointerId)
     if (!pointer) return
     const { geometry, scroll } = current
-    const row = nearestRow(geometry, point.y) + pointer.rowShift
+    const row = nearestRow(geometry, point.y, pointer.row - pointer.rowShift) + pointer.rowShift
     pointer.row = Math.min(geometry.stringYs.length - 1, Math.max(0, row))
-    pointer.fret = fretAt(geometry, scroll, toNeckAxis(geometry, point.x))
+    pointer.fret = fretAt(geometry, scroll, toNeckAxis(geometry, point.x), pointer.fret)
     instrument.hold(pointerId, geometry.stringOfRow[pointer.row] ?? 0, pointer.fret)
+  }
+
+  function letGo(pointerId: number) {
+    const hold = lingering.get(pointerId)
+    if (!hold) return
+    clearTimeout(hold.timer)
+    lingering.delete(pointerId)
+    instrument.release(pointerId)
+  }
+
+  /** The spot a finger just left, if this one is landing back on it. */
+  function leftSpot(geometry: NeckGeometry, y: number, fret: number) {
+    return [...lingering.values()].find(
+      (hold) =>
+        hold.fret === fret && nearestRow(geometry, y, hold.row - hold.rowShift) + hold.rowShift === hold.row,
+    )
   }
 
   function startFretting(current: PlayingField, pointerId: number, point: Point) {
     const { geometry, scroll, autocorrect } = current
     const origin = toNeckAxis(geometry, point.x)
     const fret = fretAt(geometry, scroll, origin)
-    const row = aimedRow(geometry, point.y, fret, [...fretting.values()], autocorrect)
-    const rowShift = row - nearestRow(geometry, point.y)
+    const back = leftSpot(geometry, point.y, fret)
+    const row = back?.row ?? aimedRow(geometry, point.y, fret, [...fretting.values()], autocorrect)
+    const rowShift = back?.rowShift ?? row - nearestRow(geometry, point.y)
+    const bounced = back !== undefined && performance.now() - back.liftedAt <= BOUNCE_MS
+
+    // A mouse comes back with the pointer id it left with: after a bounce it just keeps its note.
+    const own = lingering.get(pointerId)
+    if (own && bounced && own === back) {
+      clearTimeout(own.timer)
+      lingering.delete(pointerId)
+    } else {
+      letGo(pointerId)
+    }
+
+    // Letting go before the new press makes it sound afresh; after it, the handover is silent.
+    const lifted = [...lingering].filter(([, hold]) => hold.row === row).map(([id]) => id)
+    if (!bounced) lifted.forEach(letGo)
     fretting.set(pointerId, { point, origin, slid: false, row, fret, rowShift })
     holdAt(current, pointerId, point)
+    if (bounced) lifted.forEach(letGo)
     frettingChanged()
   }
 
@@ -216,8 +265,12 @@ export function attachPointerController(
     // Lifted before it swept anything: it was a short press.
     pressUndecided(event.pointerId)
     picking.delete(event.pointerId)
-    if (!fretting.delete(event.pointerId)) return
-    instrument.release(event.pointerId)
+    const fretter = fretting.get(event.pointerId)
+    if (!fretter) return
+    fretting.delete(event.pointerId)
+    const { row, fret, rowShift } = fretter
+    const timer = setTimeout(() => letGo(event.pointerId), LINGER_MS)
+    lingering.set(event.pointerId, { row, fret, rowShift, liftedAt: performance.now(), timer })
     frettingChanged()
   }
 
@@ -230,6 +283,8 @@ export function attachPointerController(
   return {
     releaseAll() {
       for (const pointerId of [...undecided.keys()]) decide(pointerId)
+      for (const hold of lingering.values()) clearTimeout(hold.timer)
+      lingering.clear()
       picking.clear()
       fretting.clear()
       instrument.releaseAll()

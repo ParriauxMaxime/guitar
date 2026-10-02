@@ -221,6 +221,21 @@ describe('computeNeckGeometry', () => {
     expect(fretCenter(phone, 3, 4)).toBeCloseTo(phone.boardStart + phone.fretWidth / 2)
   })
 
+  it('keeps a held fret until the finger is clearly past its wire', () => {
+    const wire = phone.boardStart + phone.fretWidth * 2
+    const slack = phone.fretWidth * 0.12
+    expect(fretAt(phone, 0, wire + slack - 1, 2)).toBe(2)
+    expect(fretAt(phone, 0, wire + slack + 1, 2)).toBe(3)
+    expect(fretAt(phone, 0, wire - slack + 1, 3)).toBe(3)
+    expect(fretAt(phone, 0, wire - slack - 1, 3)).toBe(2)
+    expect(fretAt(phone, 0, wire + 1)).toBe(3)
+  })
+
+  it('lets go of a held fret that scrolled out of the window', () => {
+    expect(fretAt(phone, 3, phone.width, 5)).toBe(8)
+    expect(fretAt(phone, 3, 0, 5)).toBe(4)
+  })
+
   it('does not let float noise add a fret to a whole number of them', () => {
     const fourFrets = HEAD_WIDTH + NUT_WIDTH + (4 * 27 + 16) * PX_PER_MM
     const whole = computeNeckGeometry({ ...options, width: fourFrets })
@@ -247,6 +262,15 @@ describe('computeNeckGeometry', () => {
     expect(nearestRow(phone, phone.stringYs[2]! + half + 1)).toBe(3)
     expect(nearestRow(phone, phone.stringYs[4]! - half + 1)).toBe(4)
     expect(nearestRow(phone, 9999)).toBe(5)
+  })
+
+  it('keeps a held string until the finger is clearly nearer another one', () => {
+    const spacing = phone.stringSpacing
+    expect(nearestRow(phone, phone.stringYs[2]! + spacing * 0.65, 2)).toBe(2)
+    expect(nearestRow(phone, phone.stringYs[2]! + spacing * 0.75, 2)).toBe(3)
+    expect(nearestRow(phone, phone.stringYs[2]! - spacing * 0.65, 2)).toBe(2)
+    expect(nearestRow(phone, phone.stringYs[2]! - spacing * 0.75, 2)).toBe(1)
+    expect(nearestRow(phone, phone.stringYs[2]! + spacing * 0.65)).toBe(3)
   })
 
   it('only frets on the neck, not on the background around it', () => {

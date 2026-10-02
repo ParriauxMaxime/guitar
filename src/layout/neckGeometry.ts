@@ -14,6 +14,10 @@ export type NeckPlacement = (typeof NECK_PLACEMENTS)[number]
 
 const STRING_EDGE_INSET_MM = 3.5
 const STRUM_OVERSHOOT_MM = 40
+// Glass gives no feel for where a string or fret ends: a finger keeps the one it holds until it is
+// this far past the boundary (in string spacings, in fret widths), or a slip would cut its note.
+const HELD_STRING_SLACK = 0.2
+const HELD_FRET_SLACK = 0.12
 // Keeps float noise from turning a whole number of frets into one more.
 const EPSILON = 1e-6
 const FREE_HEIGHT_ABOVE_NECK: Record<NeckPlacement, number> = { top: 0, center: 0.5, bottom: 1 }
@@ -125,11 +129,18 @@ export function visibleFretRange(
   }
 }
 
-/** Fret under a neck-axis position, clamped to the visible window. */
-export function fretAt(geometry: NeckGeometry, scroll: number, neckAxis: number): number {
+/** Fret under a neck-axis position, clamped to the visible window; a finger already on `held` tends to stay there. */
+export function fretAt(
+  geometry: NeckGeometry,
+  scroll: number,
+  neckAxis: number,
+  held?: number,
+): number {
   const { first, last } = visibleFretRange(geometry, scroll)
   const fromNut = scroll + (neckAxis - geometry.boardStart) / geometry.fretWidth
-  return Math.min(last, Math.max(first, Math.floor(fromNut + EPSILON) + 1))
+  const stays =
+    held !== undefined && fromNut > held - 1 - HELD_FRET_SLACK && fromNut < held + HELD_FRET_SLACK
+  return Math.min(last, Math.max(first, stays ? held : Math.floor(fromNut + EPSILON) + 1))
 }
 
 /** Neck-axis position of the middle of a fret. */
@@ -142,9 +153,11 @@ export function gapCenter(geometry: NeckGeometry, row: number): number {
   return (geometry.stringYs[0] ?? 0) + geometry.stringSpacing * (row + 0.5)
 }
 
-export function nearestRow(geometry: NeckGeometry, y: number): number {
-  const row = Math.round((y - (geometry.stringYs[0] ?? 0)) / geometry.stringSpacing)
-  return Math.min(STRING_COUNT - 1, Math.max(0, row))
+/** String row nearest to `y`; a finger already on `held` tends to stay there. */
+export function nearestRow(geometry: NeckGeometry, y: number, held?: number): number {
+  const exact = (y - (geometry.stringYs[0] ?? 0)) / geometry.stringSpacing
+  if (held !== undefined && Math.abs(exact - held) <= 0.5 + HELD_STRING_SLACK) return held
+  return Math.min(STRING_COUNT - 1, Math.max(0, Math.round(exact)))
 }
 
 export function isOnNeck(geometry: NeckGeometry, y: number): boolean {
