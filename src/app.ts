@@ -12,6 +12,7 @@ import {
   fullscreenActive,
   fullscreenAvailable,
   isImmersive,
+  keepFullscreen,
   onFullscreenChange,
   toggleFullscreen,
 } from './platform/fullscreen'
@@ -215,6 +216,7 @@ export function startApp(root: HTMLElement): void {
   })
   suppressBrowserGestures()
   absorbBackGesture()
+  keepFullscreen()
   keepScreenAwake()
   layout()
 }
