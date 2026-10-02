@@ -1,3 +1,4 @@
+import { AUTOCORRECT_LEVELS, type Autocorrect } from './input/autocorrect'
 import { NECK_PLACEMENTS, type NeckPlacement } from './layout/neckGeometry'
 import { MIN_FIRST_FRET, clampFirstFret } from './music/fretboard'
 import { DEFAULT_TUNING_ID, isTuningId, type TuningId } from './music/tunings'
@@ -10,6 +11,7 @@ export interface Settings {
   leftHanded: boolean
   lowStringOnTop: boolean
   tuning: TuningId
+  autocorrect: Autocorrect
   hammerOn: boolean
   noteLabels: boolean
   haptics: boolean
@@ -35,6 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
   leftHanded: false,
   lowStringOnTop: false,
   tuning: DEFAULT_TUNING_ID,
+  autocorrect: 'light',
   hammerOn: true,
   noteLabels: true,
   haptics: true,
@@ -72,6 +75,9 @@ export function sanitizeSettings(raw: unknown): Settings {
     leftHanded: booleanOr(stored.leftHanded, DEFAULT_SETTINGS.leftHanded),
     lowStringOnTop: booleanOr(stored.lowStringOnTop, DEFAULT_SETTINGS.lowStringOnTop),
     tuning: isTuningId(stored.tuning) ? stored.tuning : DEFAULT_SETTINGS.tuning,
+    autocorrect:
+      AUTOCORRECT_LEVELS.find((level) => level === stored.autocorrect) ??
+      DEFAULT_SETTINGS.autocorrect,
     hammerOn: booleanOr(stored.hammerOn, DEFAULT_SETTINGS.hammerOn),
     noteLabels: booleanOr(stored.noteLabels, DEFAULT_SETTINGS.noteLabels),
     haptics: booleanOr(stored.haptics, DEFAULT_SETTINGS.haptics),

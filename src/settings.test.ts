@@ -11,6 +11,7 @@ describe('sanitizeSettings', () => {
         fretWidthMm: null,
         pickZoneMm: {},
         neckPlacement: 'sideways',
+        autocorrect: 'maximum',
         haptics: 'yes',
         tuning: 'banjo',
         volume: 'loud',
@@ -27,6 +28,7 @@ describe('sanitizeSettings', () => {
       leftHanded: false,
       lowStringOnTop: false,
       tuning: 'standard',
+      autocorrect: 'light',
       hammerOn: true,
       haptics: true,
       firstFret: 1,
@@ -42,6 +44,7 @@ describe('sanitizeSettings', () => {
       leftHanded: true,
       lowStringOnTop: true,
       tuning: 'dadgad',
+      autocorrect: 'full',
       hammerOn: false,
       noteLabels: false,
       haptics: false,
@@ -98,6 +101,7 @@ describe('sanitizeSettings', () => {
         fretWidthMm: 27,
         pickZoneMm: 16,
         neckPlacement: 'center',
+        autocorrect: 'light',
         haptics: true,
       })
       expect(loaded).not.toHaveProperty('fretCount')

@@ -120,6 +120,7 @@ export function startApp(root: HTMLElement): void {
     field = {
       geometry,
       scroll: settings.firstFret - MIN_FIRST_FRET,
+      autocorrect: settings.autocorrect,
       toLocal: (clientX, clientY) => clientToLocal(box, stageLayout.rotated, clientX, clientY),
     }
 

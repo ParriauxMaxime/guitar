@@ -8,6 +8,7 @@ import {
   type NeckGeometry,
 } from '../layout/neckGeometry'
 import type { Point } from '../layout/pointerMapping'
+import { aimedRow, type Autocorrect } from './autocorrect'
 import type { Instrument } from './instrument'
 import { SLIDE_TRAVEL, edgePush } from './neckScroll'
 import {
@@ -24,6 +25,7 @@ export interface PlayingField {
   geometry: NeckGeometry
   /** Frets scrolled past the nut; fractional while the neck moves. */
   scroll: number
+  autocorrect: Autocorrect
   toLocal(clientX: number, clientY: number): Point
 }
 
@@ -41,6 +43,10 @@ interface FrettingPointer {
   /** Neck-axis position where the finger landed. */
   origin: number
   slid: boolean
+  row: number
+  fret: number
+  /** Rows between the string the finger was given on landing and the nearest one: it keeps that string as it moves. */
+  rowShift: number
 }
 
 interface PickingPointer {
@@ -74,23 +80,23 @@ export function attachPointerController(
   const picking = new Map<number, PickingPointer>()
   const undecided = new Map<number, UndecidedPointer>()
 
-  function fretUnder(current: PlayingField, point: Point) {
-    const { geometry, scroll } = current
-    const row = nearestRow(geometry, point.y)
-    return {
-      stringIndex: geometry.stringOfRow[row] ?? 0,
-      fret: fretAt(geometry, scroll, toNeckAxis(geometry, point.x)),
-    }
-  }
-
   function holdAt(current: PlayingField, pointerId: number, point: Point) {
-    const { stringIndex, fret } = fretUnder(current, point)
-    instrument.hold(pointerId, stringIndex, fret)
+    const pointer = fretting.get(pointerId)
+    if (!pointer) return
+    const { geometry, scroll } = current
+    const row = nearestRow(geometry, point.y) + pointer.rowShift
+    pointer.row = Math.min(geometry.stringYs.length - 1, Math.max(0, row))
+    pointer.fret = fretAt(geometry, scroll, toNeckAxis(geometry, point.x))
+    instrument.hold(pointerId, geometry.stringOfRow[pointer.row] ?? 0, pointer.fret)
   }
 
   function startFretting(current: PlayingField, pointerId: number, point: Point) {
-    const origin = toNeckAxis(current.geometry, point.x)
-    fretting.set(pointerId, { point, origin, slid: false })
+    const { geometry, scroll, autocorrect } = current
+    const origin = toNeckAxis(geometry, point.x)
+    const fret = fretAt(geometry, scroll, origin)
+    const row = aimedRow(geometry, point.y, fret, [...fretting.values()], autocorrect)
+    const rowShift = row - nearestRow(geometry, point.y)
+    fretting.set(pointerId, { point, origin, slid: false, row, fret, rowShift })
     holdAt(current, pointerId, point)
     frettingChanged()
   }

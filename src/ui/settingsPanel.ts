@@ -122,6 +122,11 @@ export function createSettingsPanel(onChange: (patch: Partial<Settings>) => void
       { value: false, label: 'Bottom' },
       { value: true, label: 'Top' },
     ]),
+    choiceField('Autocorrect', 'autocorrect', [
+      { value: 'off', label: 'Off' },
+      { value: 'light', label: 'Light' },
+      { value: 'full', label: 'Full' },
+    ]),
     choiceField('Hammer-on', 'hammerOn', ON_OFF),
     choiceField('Note names', 'noteLabels', ON_OFF),
     ...(hapticsAvailable() ? [choiceField('Vibration', 'haptics', ON_OFF)] : []),
