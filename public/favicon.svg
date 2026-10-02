@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="sunburst" cx="50%" cy="50%" r="72%">
+      <stop offset="0" stop-color="#f7bd52" />
+      <stop offset="0.42" stop-color="#e58f2c" />
+      <stop offset="0.74" stop-color="#9a4215" />
+      <stop offset="1" stop-color="#35160a" />
+    </radialGradient>
+    <clipPath id="shape">
+      <rect width="512" height="512" rx="112" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#shape)">
+    <rect width="512" height="512" fill="url(#sunburst)" />
+    <circle cx="256" cy="256" r="152" fill="none" stroke="#14100c" stroke-width="6" />
+    <circle cx="256" cy="256" r="140" fill="none" stroke="#f8e9c6" stroke-width="8" />
+    <circle cx="256" cy="256" r="128" fill="none" stroke="#14100c" stroke-width="6" />
+    <circle cx="256" cy="256" r="112" fill="#14100c" />
+    <g stroke="#14100c" stroke-opacity="0.3">
+      <path d="M0 186H512" stroke-width="4" />
+      <path d="M0 216H512" stroke-width="5" />
+      <path d="M0 246H512" stroke-width="6" />
+      <path d="M0 276H512" stroke-width="8" />
+      <path d="M0 306H512" stroke-width="10" />
+      <path d="M0 336H512" stroke-width="12" />
+    </g>
+    <g stroke="#fbf6ea">
+      <path d="M0 181H512" stroke-width="4" />
+      <path d="M0 211H512" stroke-width="5" />
+      <path d="M0 241H512" stroke-width="6" />
+    </g>
+    <g stroke="#f1d08a">
+      <path d="M0 271H512" stroke-width="8" />
+      <path d="M0 301H512" stroke-width="10" />
+      <path d="M0 331H512" stroke-width="12" />
+    </g>
+  </g>
+</svg>
