@@ -3,15 +3,16 @@ import {
   HEAD_WIDTH,
   NUT_WIDTH,
   PX_PER_MM,
-  cellAt,
-  cellCenter,
   computeNeckGeometry,
+  fittingFrets,
+  fretAt,
+  fretCenter,
   gapCenter,
   isOnNeck,
   nearestRow,
   spanOnSurface,
   toNeckAxis,
-  visibleFretCount,
+  visibleFretRange,
   zoneAt,
 } from './neckGeometry'
 import { clientToLocal } from './pointerMapping'
@@ -19,6 +20,7 @@ import { TOOLBAR_SIZE, computeStageLayout, type Viewport } from './stageLayout'
 
 const NECK_WIDTH_MM = 46
 const FRET_WIDTH_MM = 27
+const PICK_ZONE_MM = 16
 const TARGET_VIEWPORTS: [number, number][] = [
   [892, 412],
   [412, 892],
@@ -35,11 +37,17 @@ function surfaceOf(viewport: Viewport, neckWidthMm = NECK_WIDTH_MM) {
   }
 }
 
-function neckFor(viewport: Viewport, neckWidthMm = NECK_WIDTH_MM, fretWidthMm = FRET_WIDTH_MM) {
+function neckFor(
+  viewport: Viewport,
+  neckWidthMm = NECK_WIDTH_MM,
+  fretWidthMm = FRET_WIDTH_MM,
+  pickZoneMm = PICK_ZONE_MM,
+) {
   return computeNeckGeometry({
     ...surfaceOf(viewport, neckWidthMm),
     neckWidthMm,
     fretWidthMm,
+    pickZoneMm,
     neckPlacement: 'center',
     leftHanded: false,
     lowStringOnTop: false,
@@ -82,31 +90,37 @@ describe('computeStageLayout', () => {
   })
 })
 
-describe('visibleFretCount', () => {
+describe('fittingFrets', () => {
   it.each([
-    [892, 412, 4],
-    [412, 892, 4],
-    [832, 750, 4],
-    [750, 832, 3],
-    [667, 375, 3],
-  ])('%ix%i shows %i default frets', (width, height, expected) => {
-    expect(neckFor({ width, height }).fretCount).toBe(expected)
+    [892, 412, 4.92],
+    [412, 892, 4.92],
+    [832, 750, 4.53],
+    [750, 832, 3.99],
+    [667, 375, 3.46],
+  ])('%ix%i shows %f default frets, the last one cut', (width, height, expected) => {
+    expect(neckFor({ width, height }).visibleFrets).toBeCloseTo(expected, 1)
   })
 
   it('follows the fret width', () => {
     const viewport = { width: 892, height: 412 }
-    expect(neckFor(viewport, NECK_WIDTH_MM, 18).fretCount).toBe(6)
-    expect(neckFor(viewport, NECK_WIDTH_MM, 40).fretCount).toBe(3)
+    expect(neckFor(viewport, NECK_WIDTH_MM, 18).visibleFrets).toBe(7)
+    expect(neckFor(viewport, NECK_WIDTH_MM, 40).visibleFrets).toBeCloseTo(3.32, 1)
+  })
+
+  it('gives up frets to a wider picking zone', () => {
+    const viewport = { width: 892, height: 412 }
+    expect(neckFor(viewport, NECK_WIDTH_MM, FRET_WIDTH_MM, 60).visibleFrets).toBeCloseTo(3.29, 1)
   })
 
   it('loses length to a side toolbar', () => {
-    expect(neckFor({ width: 832, height: 320 }).fretCount).toBe(4)
-    expect(neckFor({ width: 832, height: 300 }).fretCount).toBe(3)
+    const underTopBar = neckFor({ width: 832, height: 320 }).visibleFrets
+    const besideSideBar = neckFor({ width: 832, height: 300 }).visibleFrets
+    expect(underTopBar - besideSideBar).toBeCloseTo(TOOLBAR_SIZE.side / (27 * PX_PER_MM))
   })
 
   it('stays between 2 and 7', () => {
-    expect(visibleFretCount(300, 154)).toBe(2)
-    expect(visibleFretCount(4000, 154)).toBe(7)
+    expect(fittingFrets(300, 154, 91)).toBe(2)
+    expect(fittingFrets(4000, 154, 91)).toBe(7)
   })
 })
 
@@ -116,6 +130,7 @@ describe('computeNeckGeometry', () => {
     height: 368,
     neckWidthMm: NECK_WIDTH_MM,
     fretWidthMm: FRET_WIDTH_MM,
+    pickZoneMm: PICK_ZONE_MM,
     neckPlacement: 'center',
     leftHanded: false,
     lowStringOnTop: false,
@@ -128,7 +143,7 @@ describe('computeNeckGeometry', () => {
     expect(neck.fretWidth).toBeCloseTo(27 * PX_PER_MM)
     expect(neck.stringSpacing).toBeCloseTo(7.8 * PX_PER_MM)
     expect(neck.neckTop).toBeCloseTo((neck.height - neck.neckHeight) / 2)
-    expect(neck.width - neck.boardEnd).toBeGreaterThanOrEqual(140)
+    expect(neck.width - neck.boardEnd).toBeCloseTo(16 * PX_PER_MM)
   })
 
   it('insets the outer strings 3.5 mm from the neck edges', () => {
@@ -170,21 +185,42 @@ describe('computeNeckGeometry', () => {
     ])
   })
 
-  it('splits the length into head, equal frets and picking zone', () => {
+  it('splits the length into head, frets and picking zone', () => {
     expect(phone.boardStart).toBe(HEAD_WIDTH + NUT_WIDTH)
-    expect(phone.boardEnd).toBeCloseTo(phone.boardStart + 4 * 27 * PX_PER_MM)
+    expect(phone.boardEnd).toBeCloseTo(892 - 16 * PX_PER_MM)
     expect(zoneAt(phone, 10)).toBe('head')
     expect(zoneAt(phone, phone.boardStart + 1)).toBe('fret')
     expect(zoneAt(phone, phone.boardEnd - 1)).toBe('fret')
     expect(zoneAt(phone, phone.boardEnd)).toBe('pick')
   })
 
-  it('maps positions to fret cells, clamped to the window', () => {
-    expect(cellAt(phone, phone.boardStart + 1)).toBe(0)
-    expect(cellAt(phone, cellCenter(phone, 2))).toBe(2)
-    expect(cellAt(phone, phone.boardStart + phone.fretWidth * 3 + 1)).toBe(3)
-    expect(cellAt(phone, 0)).toBe(0)
-    expect(cellAt(phone, phone.width)).toBe(3)
+  it('maps positions to frets, clamped to the window', () => {
+    expect(fretAt(phone, 0, phone.boardStart + 1)).toBe(1)
+    expect(fretAt(phone, 0, fretCenter(phone, 0, 3))).toBe(3)
+    expect(fretAt(phone, 0, phone.boardStart + phone.fretWidth * 3 + 1)).toBe(4)
+    expect(fretAt(phone, 0, phone.boardEnd - 1)).toBe(5)
+    expect(fretAt(phone, 0, 0)).toBe(1)
+    expect(fretAt(phone, 0, phone.width)).toBe(5)
+  })
+
+  it('follows the neck as it scrolls under the window', () => {
+    expect(visibleFretRange(phone, 0)).toEqual({ first: 1, last: 5 })
+    expect(visibleFretRange(phone, 3)).toEqual({ first: 4, last: 8 })
+    expect(visibleFretRange(phone, 3.5)).toEqual({ first: 4, last: 9 })
+    expect(fretAt(phone, 3, phone.boardStart + 1)).toBe(4)
+    expect(fretAt(phone, 3.5, phone.boardStart + 1)).toBe(4)
+    expect(fretAt(phone, 3.5, phone.boardStart + phone.fretWidth / 2 + 1)).toBe(5)
+    expect(fretAt(phone, 3, phone.width)).toBe(8)
+    expect(fretCenter(phone, 3, 4)).toBeCloseTo(phone.boardStart + phone.fretWidth / 2)
+  })
+
+  it('does not let float noise add a fret to a whole number of them', () => {
+    const fourFrets = HEAD_WIDTH + NUT_WIDTH + (4 * 27 + 16) * PX_PER_MM
+    const whole = computeNeckGeometry({ ...options, width: fourFrets })
+    expect(whole.visibleFrets).toBeCloseTo(4)
+    expect(visibleFretRange(whole, 0)).toEqual({ first: 1, last: 4 })
+    expect(visibleFretRange(whole, 2)).toEqual({ first: 3, last: 6 })
+    expect(fretAt(whole, 0, whole.width)).toBe(4)
   })
 
   it('maps y to the nearest string row, clamped', () => {

@@ -7,13 +7,14 @@ import { STRING_COUNT } from '../music/tunings'
 export const PX_PER_MM = 5.7
 export const HEAD_WIDTH = 34
 export const NUT_WIDTH = 10
-export const MIN_FRET_COUNT = 2
-export const MAX_FRET_COUNT = 7
+export const MIN_VISIBLE_FRETS = 2
+export const MAX_VISIBLE_FRETS = 7
 export const NECK_PLACEMENTS = ['top', 'center', 'bottom'] as const
 export type NeckPlacement = (typeof NECK_PLACEMENTS)[number]
 
 const STRING_EDGE_INSET_MM = 3.5
-const MIN_PICK_ZONE = 140
+// Keeps float noise from turning a whole number of frets into one more.
+const EPSILON = 1e-6
 const FREE_HEIGHT_ABOVE_NECK: Record<NeckPlacement, number> = { top: 0, center: 0.5, bottom: 1 }
 
 export interface NeckOptions {
@@ -21,6 +22,7 @@ export interface NeckOptions {
   height: number
   neckWidthMm: number
   fretWidthMm: number
+  pickZoneMm: number
   neckPlacement: NeckPlacement
   leftHanded: boolean
   lowStringOnTop: boolean
@@ -34,7 +36,8 @@ export interface NeckOptions {
 export interface NeckGeometry {
   width: number
   height: number
-  fretCount: number
+  /** Frets showing between the nut and the picking zone; the last one may be cut. */
+  visibleFrets: number
   leftHanded: boolean
   stringSpacing: number
   neckTop: number
@@ -52,10 +55,10 @@ export function mmToPx(mm: number): number {
   return mm * PX_PER_MM
 }
 
-/** As many whole frets as fit once the headstock and a minimal picking zone are set aside. */
-export function visibleFretCount(surfaceWidth: number, fretWidth: number): number {
-  const fitting = Math.floor((surfaceWidth - HEAD_WIDTH - NUT_WIDTH - MIN_PICK_ZONE) / fretWidth)
-  return Math.min(MAX_FRET_COUNT, Math.max(MIN_FRET_COUNT, fitting))
+/** Frets that fit between the headstock and the picking zone; a fraction is a cut last fret. */
+export function fittingFrets(surfaceWidth: number, fretWidth: number, pickZone: number): number {
+  const fitting = (surfaceWidth - HEAD_WIDTH - NUT_WIDTH - pickZone) / fretWidth
+  return Math.min(MAX_VISIBLE_FRETS, Math.max(MIN_VISIBLE_FRETS, fitting))
 }
 
 export function computeNeckGeometry(options: NeckOptions): NeckGeometry {
@@ -65,14 +68,14 @@ export function computeNeckGeometry(options: NeckOptions): NeckGeometry {
   const edgeInset = mmToPx(STRING_EDGE_INSET_MM)
   const stringSpacing = (neckHeight - 2 * edgeInset) / (STRING_COUNT - 1)
   const fretWidth = mmToPx(options.fretWidthMm)
-  const fretCount = visibleFretCount(width, fretWidth)
+  const visibleFrets = fittingFrets(width, fretWidth, mmToPx(options.pickZoneMm))
   const rows = Array.from({ length: STRING_COUNT }, (_, row) => row)
   const boardStart = HEAD_WIDTH + NUT_WIDTH
 
   return {
     width,
     height,
-    fretCount,
+    visibleFrets,
     leftHanded,
     stringSpacing,
     neckTop,
@@ -80,7 +83,7 @@ export function computeNeckGeometry(options: NeckOptions): NeckGeometry {
     stringYs: rows.map((row) => neckTop + edgeInset + stringSpacing * row),
     stringOfRow: rows.map((row) => (lowStringOnTop ? row : STRING_COUNT - 1 - row)),
     boardStart,
-    boardEnd: boardStart + fretWidth * fretCount,
+    boardEnd: boardStart + fretWidth * visibleFrets,
     fretWidth,
   }
 }
@@ -105,14 +108,27 @@ export function zoneAt(geometry: NeckGeometry, neckAxis: number): Zone {
   return neckAxis >= geometry.boardStart ? 'fret' : 'head'
 }
 
-/** Fret cell under a neck-axis position, clamped to the visible window. */
-export function cellAt(geometry: NeckGeometry, neckAxis: number): number {
-  const cell = Math.floor((neckAxis - geometry.boardStart) / geometry.fretWidth)
-  return Math.min(geometry.fretCount - 1, Math.max(0, cell))
+/** Frets at least partly inside the window of a neck scrolled `scroll` frets past the nut. */
+export function visibleFretRange(
+  geometry: NeckGeometry,
+  scroll: number,
+): { first: number; last: number } {
+  return {
+    first: Math.floor(scroll + EPSILON) + 1,
+    last: Math.ceil(scroll + geometry.visibleFrets - EPSILON),
+  }
 }
 
-export function cellCenter(geometry: NeckGeometry, cell: number): number {
-  return geometry.boardStart + geometry.fretWidth * (cell + 0.5)
+/** Fret under a neck-axis position, clamped to the visible window. */
+export function fretAt(geometry: NeckGeometry, scroll: number, neckAxis: number): number {
+  const { first, last } = visibleFretRange(geometry, scroll)
+  const fromNut = scroll + (neckAxis - geometry.boardStart) / geometry.fretWidth
+  return Math.min(last, Math.max(first, Math.floor(fromNut + EPSILON) + 1))
+}
+
+/** Neck-axis position of the middle of a fret. */
+export function fretCenter(geometry: NeckGeometry, scroll: number, fret: number): number {
+  return geometry.boardStart + geometry.fretWidth * (fret - 0.5 - scroll)
 }
 
 /** y halfway between a string row and the next one. */

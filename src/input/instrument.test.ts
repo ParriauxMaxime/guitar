@@ -94,3 +94,92 @@ describe('instrument', () => {
     expect(calls).toEqual([['pluck', 1, 45, 0.9]])
   })
 })
+
+describe('instrument barre', () => {
+  const strum = (instrument: ReturnType<typeof setup>['instrument']) => {
+    for (let stringIndex = 0; stringIndex < 6; stringIndex++) instrument.pluck(stringIndex, 0.8)
+  }
+  const pitches = (calls: unknown[][]) =>
+    calls.filter(([method]) => method === 'pluck').map(([, , midi]) => midi)
+
+  it('frets all six strings of an F chord from a single-point barre finger', () => {
+    const { instrument, calls, held } = setup(false)
+    instrument.hold(1, 0, 1)
+    instrument.hold(2, 1, 3)
+    instrument.hold(3, 2, 3)
+    instrument.hold(4, 3, 2)
+    expect(calls).toEqual([])
+    expect(held.get(4)).toEqual([1])
+    expect(held.get(5)).toEqual([1])
+
+    strum(instrument)
+    expect(pitches(calls)).toEqual([41, 48, 53, 57, 60, 65])
+  })
+
+  it('sounds the barred strings once the chord is certain when hammer-ons are on', () => {
+    const { instrument, calls } = setup(true)
+    instrument.hold(1, 0, 1)
+    instrument.hold(2, 1, 3)
+    instrument.hold(3, 2, 3)
+    expect(pitches(calls)).toEqual([41, 48, 53])
+
+    instrument.hold(4, 3, 2)
+    expect(calls.slice(3)).toEqual([
+      ['pluck', 3, 57, HAMMER_VELOCITY],
+      ['pluck', 4, 60, HAMMER_VELOCITY],
+      ['pluck', 5, 65, HAMMER_VELOCITY],
+    ])
+  })
+
+  it('keeps a power chord to its three notes until it is strummed', () => {
+    const { instrument, calls } = setup(true)
+    instrument.hold(1, 0, 3)
+    instrument.hold(2, 1, 5)
+    instrument.hold(3, 2, 5)
+    expect(pitches(calls)).toEqual([43, 50, 55])
+
+    calls.length = 0
+    strum(instrument)
+    expect(pitches(calls)).toEqual([43, 50, 55, 58, 62, 67])
+  })
+
+  it('leaves an open C chord alone', () => {
+    const { instrument, calls } = setup(false)
+    instrument.hold(1, 1, 3)
+    instrument.hold(2, 2, 2)
+    instrument.hold(3, 4, 1)
+    strum(instrument)
+    expect(pitches(calls)).toEqual([40, 48, 52, 55, 60, 64])
+  })
+
+  it('lifts the barre with the chord shape and damps the strings it was fretting', () => {
+    const { instrument, calls, held } = setup(false)
+    instrument.hold(1, 0, 1)
+    instrument.hold(2, 1, 3)
+    instrument.hold(3, 2, 3)
+    strum(instrument)
+    calls.length = 0
+
+    instrument.release(3)
+    expect(held.get(5)).toEqual([])
+    expect(calls).toEqual([
+      ['damp', 2],
+      ['damp', 3],
+      ['damp', 4],
+      ['damp', 5],
+    ])
+  })
+
+  it('keeps the barre while its own finger moves to another string', () => {
+    const { instrument, calls, held } = setup(false)
+    instrument.hold(1, 0, 1)
+    instrument.hold(2, 1, 3)
+    instrument.hold(3, 2, 3)
+    strum(instrument)
+    calls.length = 0
+
+    instrument.hold(1, 3, 1)
+    expect(held.get(5)).toEqual([1])
+    expect(calls).toEqual([])
+  })
+})

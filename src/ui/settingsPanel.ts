@@ -1,5 +1,6 @@
 import { TUNINGS } from '../music/tunings'
-import { FRET_WIDTH_MM, NECK_WIDTH_MM, type Settings } from '../settings'
+import { hapticsAvailable } from '../platform/haptics'
+import { FRET_WIDTH_MM, NECK_WIDTH_MM, PICK_ZONE_MM, type Settings } from '../settings'
 import { button, el } from './dom'
 import { ICONS } from './icons'
 import { createSlider, type SliderOptions } from './slider'
@@ -102,6 +103,12 @@ export function createSettingsPanel(onChange: (patch: Partial<Settings>) => void
       (settings) => settings.fretWidthMm,
       (fretWidthMm) => ({ fretWidthMm }),
     ),
+    sliderField(
+      { label: 'Strum zone', ...PICK_ZONE_MM },
+      ' mm',
+      (settings) => settings.pickZoneMm,
+      (pickZoneMm) => ({ pickZoneMm }),
+    ),
     choiceField('Neck placement', 'neckPlacement', [
       { value: 'top', label: 'Top' },
       { value: 'center', label: 'Center' },
@@ -117,6 +124,7 @@ export function createSettingsPanel(onChange: (patch: Partial<Settings>) => void
     ]),
     choiceField('Hammer-on', 'hammerOn', ON_OFF),
     choiceField('Note names', 'noteLabels', ON_OFF),
+    ...(hapticsAvailable() ? [choiceField('Vibration', 'haptics', ON_OFF)] : []),
     sliderField(
       { label: 'Volume', min: 0, max: 100, step: 1 },
       '%',

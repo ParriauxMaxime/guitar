@@ -1,5 +1,5 @@
 import {
-  cellAt,
+  fretAt,
   isOnNeck,
   nearestRow,
   toNeckAxis,
@@ -8,16 +8,30 @@ import {
 } from '../layout/neckGeometry'
 import type { Point } from '../layout/pointerMapping'
 import type { Instrument } from './instrument'
+import { SLIDE_TRAVEL, edgePush } from './neckScroll'
 import { TAP_VELOCITY, advanceStrum, beginStrum, strumVelocity, type Strum } from './strum'
 
 export interface PlayingField {
   geometry: NeckGeometry
-  firstFret: number
+  /** Frets scrolled past the nut; fractional while the neck moves. */
+  scroll: number
   toLocal(clientX: number, clientY: number): Point
 }
 
 export interface PointerController {
   releaseAll(): void
+  /** Re-reads what every fretting finger holds, once the neck has moved under it. */
+  refresh(): void
+  /** How hard sliding fingers push an end of the fretboard: -1 (headstock) to 1 (bridge). */
+  push(): number
+  isFretting(): boolean
+}
+
+interface FrettingPointer {
+  point: Point
+  /** Neck-axis position where the finger landed. */
+  origin: number
+  slid: boolean
 }
 
 interface PickingPointer {
@@ -37,22 +51,31 @@ export function attachPointerController(
   surface: HTMLElement,
   field: () => PlayingField | null,
   instrument: Instrument,
+  frettingChanged: () => void,
 ): PointerController {
-  const fretting = new Set<number>()
+  const fretting = new Map<number, FrettingPointer>()
   const picking = new Map<number, PickingPointer>()
 
   function fretUnder(current: PlayingField, point: Point) {
-    const { geometry, firstFret } = current
+    const { geometry, scroll } = current
     const row = nearestRow(geometry, point.y)
     return {
       stringIndex: geometry.stringOfRow[row] ?? 0,
-      fret: firstFret + cellAt(geometry, toNeckAxis(geometry, point.x)),
+      fret: fretAt(geometry, scroll, toNeckAxis(geometry, point.x)),
     }
   }
 
   function holdAt(current: PlayingField, pointerId: number, point: Point) {
     const { stringIndex, fret } = fretUnder(current, point)
     instrument.hold(pointerId, stringIndex, fret)
+  }
+
+  function slideTo(current: PlayingField, pointerId: number, pointer: FrettingPointer, point: Point) {
+    const { geometry } = current
+    const travel = Math.abs(toNeckAxis(geometry, point.x) - pointer.origin)
+    pointer.slid ||= travel >= geometry.fretWidth * SLIDE_TRAVEL
+    pointer.point = point
+    holdAt(current, pointerId, point)
   }
 
   function pluckRows(geometry: NeckGeometry, rows: number[], velocity: number) {
@@ -87,15 +110,17 @@ export function attachPointerController(
     if (event.pointerType === 'mouse' && event.button !== 0) return
     const { geometry } = current
     const point = current.toLocal(event.clientX, event.clientY)
-    const zone = zoneAt(geometry, toNeckAxis(geometry, point.x))
+    const neckAxis = toNeckAxis(geometry, point.x)
+    const zone = zoneAt(geometry, neckAxis)
 
     if (zone === 'pick') {
       const strum = beginStrum(geometry.stringYs, point.y, geometry.stringSpacing * TAP_RADIUS_RATIO)
       picking.set(event.pointerId, { strum, y: point.y, time: event.timeStamp, stringsPerSecond: 0 })
       if (strum.tapped !== null) pluckRows(geometry, [strum.tapped], TAP_VELOCITY)
     } else if (zone === 'fret' && isOnNeck(geometry, point.y)) {
-      fretting.add(event.pointerId)
+      fretting.set(event.pointerId, { point, origin: neckAxis, slid: false })
       holdAt(current, event.pointerId, point)
+      frettingChanged()
     } else {
       return
     }
@@ -106,20 +131,24 @@ export function attachPointerController(
   function onMove(event: PointerEvent) {
     const current = field()
     if (!current) return
-    const pointer = picking.get(event.pointerId)
-    if (!pointer && !fretting.has(event.pointerId)) return
+    const picker = picking.get(event.pointerId)
+    const fretter = fretting.get(event.pointerId)
+    if (!picker && !fretter) return
 
     const coalesced = event.getCoalescedEvents?.() ?? []
     for (const sample of coalesced.length > 0 ? coalesced : [event]) {
       const point = current.toLocal(sample.clientX, sample.clientY)
-      if (pointer) strumTo(current.geometry, pointer, point.y, sample.timeStamp)
-      else holdAt(current, event.pointerId, point)
+      if (picker) strumTo(current.geometry, picker, point.y, sample.timeStamp)
+      else if (fretter) slideTo(current, event.pointerId, fretter, point)
     }
+    if (fretter) frettingChanged()
   }
 
   function onEnd(event: PointerEvent) {
     picking.delete(event.pointerId)
-    if (fretting.delete(event.pointerId)) instrument.release(event.pointerId)
+    if (!fretting.delete(event.pointerId)) return
+    instrument.release(event.pointerId)
+    frettingChanged()
   }
 
   surface.addEventListener('pointerdown', onDown)
@@ -134,5 +163,21 @@ export function attachPointerController(
       fretting.clear()
       instrument.releaseAll()
     },
+    refresh() {
+      const current = field()
+      if (!current) return
+      for (const [pointerId, pointer] of fretting) holdAt(current, pointerId, pointer.point)
+    },
+    push() {
+      const current = field()
+      if (!current) return 0
+      const { geometry } = current
+      let total = 0
+      for (const pointer of fretting.values()) {
+        if (pointer.slid) total += edgePush(geometry, toNeckAxis(geometry, pointer.point.x))
+      }
+      return Math.min(1, Math.max(-1, total))
+    },
+    isFretting: () => fretting.size > 0,
   }
 }

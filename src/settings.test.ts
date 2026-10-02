@@ -9,22 +9,26 @@ describe('sanitizeSettings', () => {
       sanitizeSettings({
         neckWidthMm: 'wide',
         fretWidthMm: null,
+        pickZoneMm: {},
         neckPlacement: 'sideways',
+        haptics: 'yes',
         tuning: 'banjo',
         volume: 'loud',
       }),
     ).toEqual(DEFAULT_SETTINGS)
   })
 
-  it('defaults to a 46 mm neck with 27 mm frets, hammer-on, right-handed, low string at the bottom', () => {
+  it('defaults to a 46 mm neck with 27 mm frets and a 16 mm picking zone, hammer-on, vibration, right-handed', () => {
     expect(DEFAULT_SETTINGS).toMatchObject({
       neckWidthMm: 46,
       fretWidthMm: 27,
+      pickZoneMm: 16,
       neckPlacement: 'center',
       leftHanded: false,
       lowStringOnTop: false,
       tuning: 'standard',
       hammerOn: true,
+      haptics: true,
       firstFret: 1,
     })
   })
@@ -33,12 +37,14 @@ describe('sanitizeSettings', () => {
     const settings: Settings = {
       neckWidthMm: 52,
       fretWidthMm: 33,
+      pickZoneMm: 30,
       neckPlacement: 'bottom',
       leftHanded: true,
       lowStringOnTop: true,
       tuning: 'dadgad',
       hammerOn: false,
       noteLabels: false,
+      haptics: false,
       volume: 0.35,
       firstFret: 7,
     }
@@ -54,13 +60,17 @@ describe('sanitizeSettings', () => {
   })
 
   it('keeps the neck dimensions on whole millimetres inside the slider ranges', () => {
-    expect(sanitizeSettings({ neckWidthMm: 12, fretWidthMm: 5 })).toMatchObject({
+    expect(sanitizeSettings({ neckWidthMm: 12, fretWidthMm: 5, pickZoneMm: 2 })).toMatchObject({
       neckWidthMm: 38,
       fretWidthMm: 18,
+      pickZoneMm: 10,
     })
-    expect(sanitizeSettings({ neckWidthMm: 200, fretWidthMm: 99 })).toMatchObject({
+    expect(
+      sanitizeSettings({ neckWidthMm: 200, fretWidthMm: 99, pickZoneMm: 400 }),
+    ).toMatchObject({
       neckWidthMm: 70,
       fretWidthMm: 40,
+      pickZoneMm: 60,
     })
     expect(sanitizeSettings({ neckWidthMm: 45.4, fretWidthMm: 26.6 })).toMatchObject({
       neckWidthMm: 45,
@@ -82,7 +92,14 @@ describe('sanitizeSettings', () => {
     const { fretCount: _dropped, ...kept } = firstBuild
     for (const fretCount of [7, 'auto']) {
       const loaded = sanitizeSettings(JSON.parse(JSON.stringify({ ...firstBuild, fretCount })))
-      expect(loaded).toEqual({ ...kept, neckWidthMm: 46, fretWidthMm: 27, neckPlacement: 'center' })
+      expect(loaded).toEqual({
+        ...kept,
+        neckWidthMm: 46,
+        fretWidthMm: 27,
+        pickZoneMm: 16,
+        neckPlacement: 'center',
+        haptics: true,
+      })
       expect(loaded).not.toHaveProperty('fretCount')
     }
   })

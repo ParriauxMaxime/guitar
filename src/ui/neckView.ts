@@ -1,24 +1,24 @@
 import {
   HEAD_WIDTH,
   NUT_WIDTH,
-  cellCenter,
   gapCenter,
   spanOnSurface,
   type NeckGeometry,
 } from '../layout/neckGeometry'
-import { inlayDots, pitchAt } from '../music/fretboard'
+import { LAST_FRET, inlayDots, pitchAt } from '../music/fretboard'
 import { noteName } from '../music/notes'
 import type { Tuning } from '../music/tunings'
 import { el, px } from './dom'
 
 export interface NeckModel {
   tuning: Tuning
-  firstFret: number
   noteLabels: boolean
 }
 
 export interface NeckView {
   render(geometry: NeckGeometry, model: NeckModel): void
+  /** Slides the frets under the strings; `scroll` is in frets past the nut. */
+  setScroll(scroll: number): void
   showHeldFrets(stringIndex: number, frets: readonly number[]): void
   vibrate(stringIndex: number, velocity: number): void
 }
@@ -29,6 +29,8 @@ const FRET_WIRE_WIDTH = 5
 const BRIDGE_WIDTH = 16
 const BRIDGE_INSET = 8
 const FRET_NUMBER_HEIGHT = 15
+// Below this share of the neck width a sound hole reads as a stray dot.
+const MIN_SOUNDHOLE_RATIO = 0.4
 const VIBRATION_SHAPE = [0, 1, -0.85, 0.65, -0.5, 0.36, -0.24, 0.14, -0.06, 0]
 const VIBRATION_MS = 420
 
@@ -36,7 +38,9 @@ export function createNeckView(surface: HTMLElement): NeckView {
   let strings: HTMLElement[] = []
   let cells: HTMLElement[][] = []
   let vibrations: (Animation | undefined)[] = []
-  let firstFret = 1
+  let strips: HTMLElement[] = []
+  let nut: HTMLElement | null = null
+  let pxPerFret = 0
 
   function place(node: HTMLElement, geometry: NeckGeometry, from: number, to: number) {
     const { left, width } = spanOnSurface(geometry, from, to)
@@ -61,10 +65,13 @@ export function createNeckView(surface: HTMLElement): NeckView {
     const node = el('div', 'body')
     place(node, geometry, geometry.boardEnd, geometry.width)
     const bridgeStart = geometry.width - BRIDGE_INSET - BRIDGE_WIDTH
+    const bridge = neckBand('bridge', geometry, bridgeStart, bridgeStart + BRIDGE_WIDTH)
+
     const openLength = bridgeStart - geometry.boardEnd
+    const diameter = Math.min(openLength * 0.74, geometry.neckHeight * 0.82)
+    if (diameter < geometry.neckHeight * MIN_SOUNDHOLE_RATIO) return [node, bridge]
 
     const hole = el('div', 'soundhole')
-    const diameter = Math.min(openLength * 0.74, geometry.neckHeight * 0.82)
     hole.style.width = hole.style.height = px(diameter)
     placeAt(
       hole,
@@ -72,8 +79,6 @@ export function createNeckView(surface: HTMLElement): NeckView {
       geometry.boardEnd + openLength / 2,
       geometry.neckTop + geometry.neckHeight / 2,
     )
-
-    const bridge = neckBand('bridge', geometry, bridgeStart, bridgeStart + BRIDGE_WIDTH)
     return [node, hole, bridge]
   }
 
@@ -85,95 +90,96 @@ export function createNeckView(surface: HTMLElement): NeckView {
     return geometry.neckTop
   }
 
-  function fretDecorations(geometry: NeckGeometry, cell: number) {
-    const fret = firstFret + cell
-    const center = cellCenter(geometry, cell)
-    const nodes: HTMLElement[] = []
+  /** Every fret of the neck laid out in a row, seen through a window the size of the visible board. */
+  function fretStrip(geometry: NeckGeometry, children: HTMLElement[]) {
+    const strip = el('div', 'fret-strip', ...children)
+    strip.style.width = px(geometry.fretWidth * LAST_FRET)
+    strip.style[geometry.leftHanded ? 'right' : 'left'] = '0'
+    strips.push(strip)
 
-    const wire = neckBand('fret-wire', geometry, 0, FRET_WIRE_WIDTH)
-    placeAt(wire, geometry, geometry.boardStart + geometry.fretWidth * (cell + 1), geometry.neckTop)
-    nodes.push(wire)
-
-    const number = el('div', 'fret-number', String(fret))
-    placeAt(number, geometry, center, fretNumberTop(geometry))
-    nodes.push(number)
-
-    const dots = inlayDots(fret)
-    const dotGaps = dots === 2 ? [1, 3] : dots === 1 ? [2] : []
-    for (const row of dotGaps) {
-      const dot = el('div', 'inlay')
-      placeAt(dot, geometry, center, gapCenter(geometry, row))
-      nodes.push(dot)
-    }
-    return nodes
-  }
-
-  function stringLine(geometry: NeckGeometry, row: number, stringIndex: number) {
-    const wound = stringIndex < WOUND_STRINGS
-    const node = el('div', `string ${wound ? 'string--wound' : 'string--plain'}`)
-    const thickness = STRING_THICKNESS[stringIndex] ?? 2
-    node.style.height = px(thickness)
-    node.style.top = px((geometry.stringYs[row] ?? 0) - thickness / 2)
-    return node
+    const window = el('div', 'fretboard', strip)
+    place(window, geometry, geometry.boardStart, geometry.boardEnd)
+    return window
   }
 
   function render(geometry: NeckGeometry, model: NeckModel) {
-    firstFret = model.firstFret
     const { tuning } = model
-    const markerSize = Math.min(geometry.stringSpacing * 0.66, geometry.fretWidth * 0.56, 48)
+    const { fretWidth } = geometry
+    const stripLength = fretWidth * LAST_FRET
+    const frets = Array.from({ length: LAST_FRET }, (_, index) => index + 1)
+    const markerSize = Math.min(geometry.stringSpacing * 0.66, fretWidth * 0.56, 48)
     surface.style.setProperty('--marker-size', px(markerSize))
     surface.classList.toggle('surface--labels', model.noteLabels)
 
-    const nodes: HTMLElement[] = [
-      ...body(geometry),
-      neckBand('board', geometry, 0, geometry.boardEnd),
-      neckBand('head', geometry, 0, HEAD_WIDTH),
-      neckBand(
-        firstFret === 1 ? 'nut' : 'nut nut--shifted',
-        geometry,
-        HEAD_WIDTH,
-        HEAD_WIDTH + NUT_WIDTH,
-      ),
-    ]
-    for (let cell = 0; cell < geometry.fretCount; cell++) {
-      nodes.push(...fretDecorations(geometry, cell))
+    function onStrip(node: HTMLElement, fromNut: number, y: number) {
+      node.style.left = px(geometry.leftHanded ? stripLength - fromNut : fromNut)
+      node.style.top = px(y)
+      return node
     }
+
+    const decorations = frets.flatMap((fret) => {
+      const center = fretWidth * (fret - 0.5)
+      const wire = el('div', 'fret-wire')
+      wire.style.width = px(FRET_WIRE_WIDTH)
+      wire.style.height = px(geometry.neckHeight)
+      const dots = inlayDots(fret)
+      const dotGaps = dots === 2 ? [1, 3] : dots === 1 ? [2] : []
+      return [
+        onStrip(wire, fretWidth * fret, geometry.neckTop),
+        onStrip(el('div', 'fret-number', String(fret)), center, fretNumberTop(geometry)),
+        ...dotGaps.map((row) => onStrip(el('div', 'inlay'), center, gapCenter(geometry, row))),
+      ]
+    })
 
     strings = []
     cells = []
+    const openLabels: HTMLElement[] = []
     geometry.stringOfRow.forEach((stringIndex, row) => {
       const y = geometry.stringYs[row] ?? 0
-      const line = stringLine(geometry, row, stringIndex)
+      const wound = stringIndex < WOUND_STRINGS
+      const line = el('div', `string ${wound ? 'string--wound' : 'string--plain'}`)
+      const thickness = STRING_THICKNESS[stringIndex] ?? 2
+      line.style.height = px(thickness)
+      line.style.top = px(y - thickness / 2)
       strings[stringIndex] = line
-      nodes.push(line)
 
       const openLabel = el('div', 'open-label', noteName(pitchAt(tuning.open, stringIndex, 0), tuning.flats))
       placeAt(openLabel, geometry, HEAD_WIDTH / 2, y)
-      nodes.push(openLabel)
+      openLabels.push(openLabel)
 
-      cells[stringIndex] = Array.from({ length: geometry.fretCount }, (_, cell) => {
-        const pitch = pitchAt(tuning.open, stringIndex, firstFret + cell)
-        const node = el(
-          'div',
-          'cell',
-          el('span', 'cell__marker'),
-          el('span', 'cell__label', noteName(pitch, tuning.flats)),
-        )
-        placeAt(node, geometry, cellCenter(geometry, cell), y)
-        nodes.push(node)
-        return node
+      cells[stringIndex] = frets.map((fret) => {
+        const name = noteName(pitchAt(tuning.open, stringIndex, fret), tuning.flats)
+        const cell = el('div', 'cell', el('span', 'cell__marker'), el('span', 'cell__label', name))
+        return onStrip(cell, fretWidth * (fret - 0.5), y)
       })
     })
 
+    strips = []
     vibrations = []
-    surface.replaceChildren(...nodes)
+    pxPerFret = geometry.leftHanded ? -fretWidth : fretWidth
+    nut = neckBand('nut', geometry, HEAD_WIDTH, HEAD_WIDTH + NUT_WIDTH)
+    surface.replaceChildren(
+      ...body(geometry),
+      neckBand('board', geometry, 0, geometry.boardEnd),
+      fretStrip(geometry, decorations),
+      neckBand('head', geometry, 0, HEAD_WIDTH),
+      nut,
+      ...strings,
+      fretStrip(geometry, cells.flat()),
+      ...openLabels,
+    )
   }
 
   return {
     render,
+    setScroll(scroll) {
+      const shift = `translateX(${px(-scroll * pxPerFret)})`
+      for (const strip of strips) strip.style.transform = shift
+      nut?.classList.toggle('nut--shifted', scroll > 0)
+    },
     showHeldFrets(stringIndex, frets) {
       cells[stringIndex]?.forEach((cell, index) => {
-        cell.classList.toggle('is-held', frets.includes(firstFret + index))
+        cell.classList.toggle('is-held', frets.includes(index + 1))
       })
     },
     vibrate(stringIndex, velocity) {

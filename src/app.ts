@@ -1,11 +1,12 @@
 import { createGuitarAudio } from './audio/engine'
 import { withAudioSpy } from './debug/audioSpy'
 import { createInstrument } from './input/instrument'
+import { advanceScroll } from './input/neckScroll'
 import { attachPointerController, type PlayingField } from './input/pointerController'
-import { computeNeckGeometry } from './layout/neckGeometry'
+import { computeNeckGeometry, visibleFretRange } from './layout/neckGeometry'
 import { clientToLocal } from './layout/pointerMapping'
 import { TOOLBAR_SIZE, computeStageLayout } from './layout/stageLayout'
-import { clampFirstFret, reachablePitches } from './music/fretboard'
+import { MAX_FIRST_FRET, MIN_FIRST_FRET, clampFirstFret, reachablePitches } from './music/fretboard'
 import { tuningById } from './music/tunings'
 import {
   fullscreenActive,
@@ -14,6 +15,7 @@ import {
   toggleFullscreen,
 } from './platform/fullscreen'
 import { suppressBrowserGestures } from './platform/gestures'
+import { buzz, pulseMs } from './platform/haptics'
 import { keepScreenAwake } from './platform/wakeLock'
 import { loadSettings, saveSettings, type Settings } from './settings'
 import { el, px } from './ui/dom'
@@ -21,11 +23,17 @@ import { createNeckView } from './ui/neckView'
 import { createSettingsPanel } from './ui/settingsPanel'
 import { createToolbar } from './ui/toolbar'
 
+const MAX_SCROLL = MAX_FIRST_FRET - MIN_FIRST_FRET
+// A stalled frame must not make the neck jump several frets at once.
+const MAX_FRAME_SECONDS = 0.05
+
 export function startApp(root: HTMLElement): void {
   let settings = loadSettings()
   let field: PlayingField | null = null
   let prewarmed = ''
   let layoutQueued = false
+  let scrolling = false
+  let lastFrame = 0
 
   const audio = withAudioSpy(createGuitarAudio())
   audio.setVolume(settings.volume)
@@ -34,9 +42,12 @@ export function startApp(root: HTMLElement): void {
   const neck = createNeckView(surface)
   const instrument = createInstrument(audio, instrumentConfig(), {
     heldFretsChanged: neck.showHeldFrets,
-    stringSounded: neck.vibrate,
+    stringSounded(stringIndex, velocity) {
+      neck.vibrate(stringIndex, velocity)
+      if (settings.haptics) buzz(pulseMs(stringIndex, velocity))
+    },
   })
-  const pointers = attachPointerController(surface, () => field, instrument)
+  const pointers = attachPointerController(surface, () => field, instrument, wakeScroll)
 
   const panel = createSettingsPanel(changeSettings)
   const toolbar = createToolbar({
@@ -57,8 +68,11 @@ export function startApp(root: HTMLElement): void {
     settings = { ...settings, ...patch }
     saveSettings(settings)
     audio.setVolume(settings.volume)
-    // Dragging the volume slider must not rebuild the neck or cut ringing notes.
-    if (Object.keys(patch).every((key) => key === 'volume')) return
+    // Neither changes the neck, and rebuilding it would cut ringing notes.
+    if (Object.keys(patch).every((key) => key === 'volume' || key === 'haptics')) {
+      panel.update(settings)
+      return
+    }
     instrument.configure(instrumentConfig())
     layout()
   }
@@ -66,7 +80,6 @@ export function startApp(root: HTMLElement): void {
   function layout() {
     const viewport = { width: window.innerWidth, height: window.innerHeight }
     const stageLayout = computeStageLayout(viewport, settings.neckWidthMm)
-    const tuning = tuningById(settings.tuning)
 
     stage.style.width = px(stageLayout.width)
     stage.style.height = px(stageLayout.height)
@@ -87,6 +100,7 @@ export function startApp(root: HTMLElement): void {
       height: surface.clientHeight,
       neckWidthMm: settings.neckWidthMm,
       fretWidthMm: settings.fretWidthMm,
+      pickZoneMm: settings.pickZoneMm,
       neckPlacement: settings.neckPlacement,
       leftHanded: settings.leftHanded,
       lowStringOnTop: settings.lowStringOnTop,
@@ -94,23 +108,59 @@ export function startApp(root: HTMLElement): void {
     const box = surface.getBoundingClientRect()
     field = {
       geometry,
-      firstFret: settings.firstFret,
+      scroll: settings.firstFret - MIN_FIRST_FRET,
       toLocal: (clientX, clientY) => clientToLocal(box, stageLayout.rotated, clientX, clientY),
     }
 
-    neck.render(geometry, {
-      tuning,
-      firstFret: settings.firstFret,
-      noteLabels: settings.noteLabels,
-    })
+    neck.render(geometry, { tuning: tuningById(settings.tuning), noteLabels: settings.noteLabels })
+    neck.setScroll(field.scroll)
     panel.update(settings)
     refreshToolbar()
+    prewarmWindow(field)
+  }
 
-    const pitches = reachablePitches(tuning.open, settings.firstFret, geometry.fretCount)
-    if (pitches.join() !== prewarmed) {
-      prewarmed = pitches.join()
-      audio.prewarm(pitches)
+  function prewarmWindow({ geometry, scroll }: PlayingField) {
+    const { first, last } = visibleFretRange(geometry, scroll)
+    // One fret further, so a scrolling neck never meets an unrendered note.
+    const pitches = reachablePitches(tuningById(settings.tuning).open, first, last - first + 2)
+    if (pitches.join() === prewarmed) return
+    prewarmed = pitches.join()
+    audio.prewarm(pitches)
+  }
+
+  function scrollNeck(scroll: number) {
+    if (!field) return
+    field.scroll = scroll
+    neck.setScroll(scroll)
+    pointers.refresh()
+
+    const firstFret = Math.floor(scroll) + MIN_FIRST_FRET
+    if (firstFret === settings.firstFret) return
+    settings = { ...settings, firstFret }
+    saveSettings(settings)
+    refreshToolbar()
+    prewarmWindow(field)
+  }
+
+  function scrollFrame(now: number) {
+    // A frame's timestamp can predate the event that woke the loop: such a frame only starts the clock.
+    const seconds = Math.min(MAX_FRAME_SECONDS, Math.max(0, (now - lastFrame) / 1000))
+    lastFrame = now
+    const scroll = field?.scroll ?? 0
+    const next = advanceScroll(scroll, pointers.push(), pointers.isFretting(), seconds, MAX_SCROLL)
+    if (next === scroll && seconds > 0) {
+      scrolling = false
+      return
     }
+    if (next !== scroll) scrollNeck(next)
+    requestAnimationFrame(scrollFrame)
+  }
+
+  function wakeScroll() {
+    if (scrolling) return
+    scrolling = true
+    lastFrame = performance.now()
+    requestAnimationFrame(scrollFrame)
   }
 
   function refreshToolbar() {
@@ -136,9 +186,10 @@ export function startApp(root: HTMLElement): void {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') pointers.releaseAll()
   })
-  document.addEventListener('pointerdown', () => void audio.unlock().catch(() => {}), {
-    capture: true,
-  })
+  // Some browsers only let audio start once the first touch has ended.
+  for (const type of ['pointerdown', 'pointerup']) {
+    document.addEventListener(type, () => void audio.unlock().catch(() => {}), { capture: true })
+  }
   onFullscreenChange(refreshToolbar)
   suppressBrowserGestures()
   keepScreenAwake()

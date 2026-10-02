@@ -63,6 +63,19 @@
     inset 0 0 30px rgb(0 0 0 / 0.45);
 }
 
+/* Window on the frets: they slide under it when the neck scrolls. */
+.fretboard {
+  top: 0;
+  bottom: 0;
+  overflow: hidden;
+}
+
+.fret-strip {
+  top: 0;
+  bottom: 0;
+  will-change: transform;
+}
+
 .head {
   background: linear-gradient(180deg, #1d1612, #110d0b);
 }

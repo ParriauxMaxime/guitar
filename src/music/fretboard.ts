@@ -1,5 +1,6 @@
 export const MIN_FIRST_FRET = 1
 export const MAX_FIRST_FRET = 13
+export const LAST_FRET = 19
 export const OPEN_FRET = 0
 
 const SINGLE_DOT_FRETS = [3, 5, 7, 9, 15, 17, 19]
