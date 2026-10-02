@@ -4,3 +4,18 @@ export function suppressBrowserGestures(): void {
     document.addEventListener(type, (event) => event.preventDefault())
   }
 }
+
+/**
+ * Android's back gesture is an inward swipe from a screen edge, easily made while playing, and
+ * a page cannot switch it off: it is given a throwaway history entry to consume instead.
+ */
+export function absorbBackGesture(): void {
+  // Chrome skips entries pushed without a user gesture, so the entry is renewed on real touches.
+  document.addEventListener(
+    'pointerup',
+    () => {
+      if (history.state?.absorbsBack !== true) history.pushState({ absorbsBack: true }, '')
+    },
+    { capture: true },
+  )
+}

@@ -11,14 +11,16 @@ import { tuningById } from './music/tunings'
 import {
   fullscreenActive,
   fullscreenAvailable,
+  isImmersive,
   onFullscreenChange,
   toggleFullscreen,
 } from './platform/fullscreen'
-import { suppressBrowserGestures } from './platform/gestures'
+import { absorbBackGesture, suppressBrowserGestures } from './platform/gestures'
 import { buzz, pulseMs } from './platform/haptics'
 import { keepScreenAwake } from './platform/wakeLock'
 import { loadSettings, saveSettings, type Settings } from './settings'
-import { el, px } from './ui/dom'
+import { button, el, px } from './ui/dom'
+import { ICONS } from './ui/icons'
 import { createNeckView } from './ui/neckView'
 import { createSettingsPanel } from './ui/settingsPanel'
 import { createToolbar } from './ui/toolbar'
@@ -34,6 +36,7 @@ export function startApp(root: HTMLElement): void {
   let layoutQueued = false
   let scrolling = false
   let lastFrame = 0
+  let toolbarOpen = false
 
   const audio = withAudioSpy(createGuitarAudio())
   audio.setVolume(settings.volume)
@@ -55,7 +58,9 @@ export function startApp(root: HTMLElement): void {
     openSettings: panel.open,
     toggleFullscreen,
   })
-  const stage = el('div', 'stage', toolbar.element, surface, panel.element)
+  const handle = button('toolbar-handle', 'Show toolbar', () => showToolbar(true))
+  handle.innerHTML = ICONS.more
+  const stage = el('div', 'stage', toolbar.element, surface, handle, panel.element)
   stage.style.setProperty('--toolbar-top', px(TOOLBAR_SIZE.top))
   stage.style.setProperty('--toolbar-side', px(TOOLBAR_SIZE.side))
   root.replaceChildren(stage)
@@ -77,9 +82,14 @@ export function startApp(root: HTMLElement): void {
     layout()
   }
 
+  function showToolbar(open: boolean) {
+    toolbarOpen = open
+    stage.classList.toggle('stage--toolbar-open', open)
+  }
+
   function layout() {
     const viewport = { width: window.innerWidth, height: window.innerHeight }
-    const stageLayout = computeStageLayout(viewport, settings.neckWidthMm)
+    const stageLayout = computeStageLayout(viewport, settings.neckWidthMm, !isImmersive())
 
     stage.style.width = px(stageLayout.width)
     stage.style.height = px(stageLayout.height)
@@ -92,6 +102,7 @@ export function startApp(root: HTMLElement): void {
       stageLayout.rotated ? 'stage--rotated' : '',
       settings.leftHanded ? 'stage--left-handed' : '',
       settings.neckPlacement === 'top' ? 'stage--neck-top' : '',
+      toolbarOpen ? 'stage--toolbar-open' : '',
     ].join(' ')
 
     pointers.releaseAll()
@@ -190,8 +201,19 @@ export function startApp(root: HTMLElement): void {
   for (const type of ['pointerdown', 'pointerup']) {
     document.addEventListener(type, () => void audio.unlock().catch(() => {}), { capture: true })
   }
-  onFullscreenChange(refreshToolbar)
+  document.addEventListener(
+    'pointerdown',
+    (event) => {
+      if (toolbarOpen && !toolbar.element.contains(event.target as Node)) showToolbar(false)
+    },
+    { capture: true },
+  )
+  onFullscreenChange(() => {
+    showToolbar(false)
+    queueLayout()
+  })
   suppressBrowserGestures()
+  absorbBackGesture()
   keepScreenAwake()
   layout()
 }

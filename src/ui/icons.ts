@@ -9,5 +9,6 @@ export const ICONS = {
   ),
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
   minus: svg('<path d="M6 12h12"/>'),
+  more: svg('<path d="M5 12h.01M12 12h.01M19 12h.01"/>'),
   plus: svg('<path d="M6 12h12M12 6v12"/>'),
 }

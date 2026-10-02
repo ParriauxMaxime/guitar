@@ -4,6 +4,7 @@ import {
   MIN_PLUCK_VELOCITY,
   advanceStrum,
   beginStrum,
+  isStrumming,
   strumVelocity,
   type Strum,
 } from './strum'
@@ -68,6 +69,22 @@ describe('advanceStrum', () => {
   it('never plucks without movement', () => {
     const strum = beginStrum(LINES, 150, TAP_RADIUS)
     expect(drag(strum, [150, 150, 150]).flat()).toEqual([])
+  })
+})
+
+describe('isStrumming', () => {
+  const spacing = 44
+
+  it('needs a clear sweep across the strings', () => {
+    expect(isStrumming(0, 0, spacing)).toBe(false)
+    expect(isStrumming(6, 0, spacing)).toBe(false)
+    expect(isStrumming(14, 2, spacing)).toBe(true)
+    expect(isStrumming(-14, 2, spacing)).toBe(true)
+  })
+
+  it('takes a move along the neck for a slide, not a strum', () => {
+    expect(isStrumming(14, 40, spacing)).toBe(false)
+    expect(isStrumming(30, -31, spacing)).toBe(false)
   })
 })
 

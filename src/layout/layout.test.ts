@@ -9,6 +9,7 @@ import {
   fretCenter,
   gapCenter,
   isOnNeck,
+  nearPickZone,
   nearestRow,
   spanOnSurface,
   toNeckAxis,
@@ -80,6 +81,12 @@ describe('computeStageLayout', () => {
 
   it.each(TARGET_VIEWPORTS)('%ix%i has the toolbar on top with the default neck', (width, height) => {
     expect(computeStageLayout({ width, height }, NECK_WIDTH_MM).toolbar).toBe('top')
+  })
+
+  it('hides the toolbar when it is not docked, whatever the neck', () => {
+    expect(computeStageLayout({ width: 892, height: 412 }, NECK_WIDTH_MM, false).toolbar).toBe('hidden')
+    expect(computeStageLayout({ width: 892, height: 412 }, 70, false).toolbar).toBe('hidden')
+    expect(TOOLBAR_SIZE.hidden).toBe(0)
   })
 
   it('moves the toolbar to the side when the requested neck does not fit under it', () => {
@@ -221,6 +228,15 @@ describe('computeNeckGeometry', () => {
     expect(visibleFretRange(whole, 0)).toEqual({ first: 1, last: 4 })
     expect(visibleFretRange(whole, 2)).toEqual({ first: 3, last: 6 })
     expect(fretAt(whole, 0, whole.width)).toBe(4)
+  })
+
+  it('expects strums to overshoot onto the 40 mm of fretboard next to the picking zone', () => {
+    expect(nearPickZone(phone, phone.boardEnd - 1)).toBe(true)
+    expect(nearPickZone(phone, phone.boardEnd - 39 * PX_PER_MM)).toBe(true)
+    expect(nearPickZone(phone, phone.boardEnd - 41 * PX_PER_MM)).toBe(false)
+    expect(nearPickZone(phone, fretCenter(phone, 0, 1))).toBe(false)
+    expect(nearPickZone(phone, fretCenter(phone, 0, 3))).toBe(false)
+    expect(nearPickZone(phone, fretCenter(phone, 0, 5))).toBe(true)
   })
 
   it('maps y to the nearest string row, clamped', () => {

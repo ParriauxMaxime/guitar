@@ -1,6 +1,7 @@
 import {
   fretAt,
   isOnNeck,
+  nearPickZone,
   nearestRow,
   toNeckAxis,
   zoneAt,
@@ -9,7 +10,15 @@ import {
 import type { Point } from '../layout/pointerMapping'
 import type { Instrument } from './instrument'
 import { SLIDE_TRAVEL, edgePush } from './neckScroll'
-import { TAP_VELOCITY, advanceStrum, beginStrum, strumVelocity, type Strum } from './strum'
+import {
+  STRUM_DECISION_MS,
+  TAP_VELOCITY,
+  advanceStrum,
+  beginStrum,
+  isStrumming,
+  strumVelocity,
+  type Strum,
+} from './strum'
 
 export interface PlayingField {
   geometry: NeckGeometry
@@ -41,6 +50,14 @@ interface PickingPointer {
   stringsPerSecond: number
 }
 
+/** A finger that landed on the frets beside the picking zone and may yet turn out to be strumming. */
+interface UndecidedPointer {
+  origin: Point
+  point: Point
+  time: number
+  timer: ReturnType<typeof setTimeout>
+}
+
 const TAP_RADIUS_RATIO = 0.35
 const HYSTERESIS_RATIO = 0.06
 /** A finger that paused is treated as having started moving at most this long ago. */
@@ -55,6 +72,7 @@ export function attachPointerController(
 ): PointerController {
   const fretting = new Map<number, FrettingPointer>()
   const picking = new Map<number, PickingPointer>()
+  const undecided = new Map<number, UndecidedPointer>()
 
   function fretUnder(current: PlayingField, point: Point) {
     const { geometry, scroll } = current
@@ -70,6 +88,13 @@ export function attachPointerController(
     instrument.hold(pointerId, stringIndex, fret)
   }
 
+  function startFretting(current: PlayingField, pointerId: number, point: Point) {
+    const origin = toNeckAxis(current.geometry, point.x)
+    fretting.set(pointerId, { point, origin, slid: false })
+    holdAt(current, pointerId, point)
+    frettingChanged()
+  }
+
   function slideTo(current: PlayingField, pointerId: number, pointer: FrettingPointer, point: Point) {
     const { geometry } = current
     const travel = Math.abs(toNeckAxis(geometry, point.x) - pointer.origin)
@@ -83,6 +108,12 @@ export function attachPointerController(
       const stringIndex = geometry.stringOfRow[row]
       if (stringIndex !== undefined) instrument.pluck(stringIndex, velocity)
     }
+  }
+
+  function startPicking(geometry: NeckGeometry, pointerId: number, point: Point, time: number) {
+    const strum = beginStrum(geometry.stringYs, point.y, geometry.stringSpacing * TAP_RADIUS_RATIO)
+    picking.set(pointerId, { strum, y: point.y, time, stringsPerSecond: 0 })
+    if (strum.tapped !== null) pluckRows(geometry, [strum.tapped], TAP_VELOCITY)
   }
 
   function strumTo(geometry: NeckGeometry, pointer: PickingPointer, y: number, time: number) {
@@ -104,6 +135,37 @@ export function attachPointerController(
     pluckRows(geometry, step.crossed, strumVelocity(pointer.stringsPerSecond))
   }
 
+  // Fretting at once would sound a wrong note under a strum that overshot the picking zone,
+  // so the finger gets a moment to show which of the two it is doing.
+  function hesitate(pointerId: number, point: Point, time: number) {
+    const timer = setTimeout(() => pressUndecided(pointerId), STRUM_DECISION_MS)
+    undecided.set(pointerId, { origin: point, point, time, timer })
+  }
+
+  function decide(pointerId: number): UndecidedPointer | undefined {
+    const pointer = undecided.get(pointerId)
+    if (pointer) clearTimeout(pointer.timer)
+    undecided.delete(pointerId)
+    return pointer
+  }
+
+  function pressUndecided(pointerId: number) {
+    const pointer = decide(pointerId)
+    const current = field()
+    if (pointer && current) startFretting(current, pointerId, pointer.point)
+  }
+
+  function strumIfSweeping(geometry: NeckGeometry, pointerId: number, point: Point) {
+    const pointer = undecided.get(pointerId)
+    if (!pointer) return
+    pointer.point = point
+    const across = point.y - pointer.origin.y
+    const along = point.x - pointer.origin.x
+    if (!isStrumming(across, along, geometry.stringSpacing)) return
+    decide(pointerId)
+    startPicking(geometry, pointerId, pointer.origin, pointer.time)
+  }
+
   function onDown(event: PointerEvent) {
     const current = field()
     if (!current) return
@@ -113,16 +175,15 @@ export function attachPointerController(
     const neckAxis = toNeckAxis(geometry, point.x)
     const zone = zoneAt(geometry, neckAxis)
 
-    if (zone === 'pick') {
-      const strum = beginStrum(geometry.stringYs, point.y, geometry.stringSpacing * TAP_RADIUS_RATIO)
-      picking.set(event.pointerId, { strum, y: point.y, time: event.timeStamp, stringsPerSecond: 0 })
-      if (strum.tapped !== null) pluckRows(geometry, [strum.tapped], TAP_VELOCITY)
-    } else if (zone === 'fret' && isOnNeck(geometry, point.y)) {
-      fretting.set(event.pointerId, { point, origin: neckAxis, slid: false })
-      holdAt(current, event.pointerId, point)
-      frettingChanged()
-    } else {
+    // Beside the neck there is nothing to fret: a finger landing there can only be about to strum.
+    if (zone === 'pick' || !isOnNeck(geometry, point.y)) {
+      startPicking(geometry, event.pointerId, point, event.timeStamp)
+    } else if (zone === 'head') {
       return
+    } else if (nearPickZone(geometry, neckAxis)) {
+      hesitate(event.pointerId, point, event.timeStamp)
+    } else {
+      startFretting(current, event.pointerId, point)
     }
     // Touch pointers are captured implicitly; this keeps mouse drags consistent with them.
     if (event.pointerType === 'mouse') surface.setPointerCapture(event.pointerId)
@@ -131,6 +192,7 @@ export function attachPointerController(
   function onMove(event: PointerEvent) {
     const current = field()
     if (!current) return
+    strumIfSweeping(current.geometry, event.pointerId, current.toLocal(event.clientX, event.clientY))
     const picker = picking.get(event.pointerId)
     const fretter = fretting.get(event.pointerId)
     if (!picker && !fretter) return
@@ -145,6 +207,8 @@ export function attachPointerController(
   }
 
   function onEnd(event: PointerEvent) {
+    // Lifted before it swept anything: it was a short press.
+    pressUndecided(event.pointerId)
     picking.delete(event.pointerId)
     if (!fretting.delete(event.pointerId)) return
     instrument.release(event.pointerId)
@@ -159,6 +223,7 @@ export function attachPointerController(
 
   return {
     releaseAll() {
+      for (const pointerId of [...undecided.keys()]) decide(pointerId)
       picking.clear()
       fretting.clear()
       instrument.releaseAll()

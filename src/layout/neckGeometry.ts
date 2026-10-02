@@ -13,6 +13,7 @@ export const NECK_PLACEMENTS = ['top', 'center', 'bottom'] as const
 export type NeckPlacement = (typeof NECK_PLACEMENTS)[number]
 
 const STRING_EDGE_INSET_MM = 3.5
+const STRUM_OVERSHOOT_MM = 40
 // Keeps float noise from turning a whole number of frets into one more.
 const EPSILON = 1e-6
 const FREE_HEIGHT_ABOVE_NECK: Record<NeckPlacement, number> = { top: 0, center: 0.5, bottom: 1 }
@@ -99,6 +100,11 @@ export function spanOnSurface(
   to: number,
 ): { left: number; width: number } {
   return { left: geometry.leftHanded ? geometry.width - to : from, width: to - from }
+}
+
+/** Whether a spot of the fretboard is close enough to the picking zone for a strum to land there for lack of room. */
+export function nearPickZone(geometry: NeckGeometry, neckAxis: number): boolean {
+  return neckAxis >= geometry.boardEnd - mmToPx(STRUM_OVERSHOOT_MM)
 }
 
 export type Zone = 'head' | 'fret' | 'pick'

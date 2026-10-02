@@ -12,6 +12,11 @@ export function fullscreenActive(): boolean {
   return document.fullscreenElement !== null
 }
 
+/** The page has the whole screen to itself: fullscreen, or installed and launched as an app. */
+export function isImmersive(): boolean {
+  return fullscreenActive() || isStandalone()
+}
+
 export function toggleFullscreen(): void {
   const request = fullscreenActive()
     ? document.exitFullscreen()

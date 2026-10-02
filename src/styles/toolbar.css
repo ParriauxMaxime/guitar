@@ -35,6 +35,61 @@
   border-left: 1px solid var(--line);
 }
 
+/* With the whole screen to play on, the bar stays away until its handle is tapped, then floats over the stage. */
+.stage--toolbar-hidden .toolbar {
+  position: absolute;
+  top: var(--safe-top);
+  right: var(--safe-right);
+  left: var(--safe-left);
+  display: none;
+  height: var(--toolbar-top);
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.6);
+}
+
+.stage--toolbar-hidden.stage--neck-top .toolbar {
+  top: auto;
+  bottom: var(--safe-bottom);
+  border-top: 1px solid var(--line);
+  border-bottom: 0;
+}
+
+.stage--toolbar-hidden.stage--toolbar-open .toolbar {
+  display: flex;
+}
+
+/* Sits beside the headstock, where no finger plays. */
+.toolbar-handle {
+  position: absolute;
+  top: calc(var(--safe-top) + 4px);
+  left: calc(var(--safe-left) + 1px);
+  z-index: 1;
+  display: none;
+  place-items: center;
+  width: 32px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: rgb(42 34 28 / 0.75);
+  color: var(--ink-dim);
+}
+
+.stage--left-handed .toolbar-handle {
+  right: calc(var(--safe-right) + 1px);
+  left: auto;
+}
+
+.stage--neck-top .toolbar-handle {
+  top: auto;
+  bottom: calc(var(--safe-bottom) + 4px);
+}
+
+.stage--toolbar-hidden:not(.stage--toolbar-open) .toolbar-handle {
+  display: grid;
+}
+
 .tool {
   flex: none;
   display: grid;

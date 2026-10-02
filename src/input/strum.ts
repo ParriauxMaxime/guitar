@@ -1,9 +1,13 @@
 export const MIN_PLUCK_VELOCITY = 0.45
 export const MAX_PLUCK_VELOCITY = 1
 export const TAP_VELOCITY = 0.7
+/** A finger landing beside the picking zone has this long to show that it is strumming. */
+export const STRUM_DECISION_MS = 45
 
 const SLOW_STRINGS_PER_SECOND = 5
 const FAST_STRINGS_PER_SECOND = 50
+// Travel across the strings, in string spacings, that gives a strum away.
+const STRUM_TRAVEL = 0.3
 
 type Side = -1 | 0 | 1
 
@@ -69,6 +73,11 @@ export function advanceStrum(
   })
   if (!movedDown) crossed.reverse()
   return { strum: { sides, tapped: strum.tapped }, crossed }
+}
+
+/** Whether a finger that has moved this far since it landed is sweeping the strings rather than pressing one. */
+export function isStrumming(across: number, along: number, stringSpacing: number): boolean {
+  return Math.abs(across) >= stringSpacing * STRUM_TRAVEL && Math.abs(across) > Math.abs(along)
 }
 
 export function strumVelocity(stringsPerSecond: number): number {

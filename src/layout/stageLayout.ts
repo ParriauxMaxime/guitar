@@ -5,7 +5,7 @@ export interface Viewport {
   height: number
 }
 
-export type ToolbarPlacement = 'top' | 'side'
+export type ToolbarPlacement = 'top' | 'side' | 'hidden'
 
 export interface StageLayout {
   /** Stage is turned 90° clockwise so the neck runs along a narrow portrait screen. */
@@ -15,11 +15,15 @@ export interface StageLayout {
   toolbar: ToolbarPlacement
 }
 
-export const TOOLBAR_SIZE: Record<ToolbarPlacement, number> = { top: 44, side: 56 }
+export const TOOLBAR_SIZE: Record<ToolbarPlacement, number> = { top: 44, side: 56, hidden: 0 }
 
 const NARROW_PORTRAIT_WIDTH = 600
 
-export function computeStageLayout({ width, height }: Viewport, neckWidthMm: number): StageLayout {
+export function computeStageLayout(
+  { width, height }: Viewport,
+  neckWidthMm: number,
+  toolbarDocked = true,
+): StageLayout {
   const rotated = width < NARROW_PORTRAIT_WIDTH && height > width
   const stageWidth = rotated ? height : width
   const stageHeight = rotated ? width : height
@@ -29,6 +33,6 @@ export function computeStageLayout({ width, height }: Viewport, neckWidthMm: num
     rotated,
     width: stageWidth,
     height: stageHeight,
-    toolbar: neckFitsUnderTopBar ? 'top' : 'side',
+    toolbar: !toolbarDocked ? 'hidden' : neckFitsUnderTopBar ? 'top' : 'side',
   }
 }
